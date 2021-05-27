@@ -69,7 +69,7 @@ namespace Febucci.HierarchyData
                 EditorGUI.DrawRect(originalRect, currentBranch.overlayColor);
             }
 
-            static float GetStartX(Rect originalRect, int nestLevel)
+            public static float GetStartX(Rect originalRect, int nestLevel)
             {
                 return 37 + (originalRect.height-2) * nestLevel;
                 //return originalRect.x                //aligned start position (9 is the magic number here)
@@ -110,24 +110,24 @@ namespace Febucci.HierarchyData
                     );
             }
 
-            public static void DrawHorizontalLineFrom(Rect originalRect, int nestLevel, bool hasChilds)
+            public static void DrawHorizontalLineFrom(Rect originalRect, int nestLevel, bool hasChilds, bool isLastChildInNestingLevel)
             {
-                if(currentBranch.colors.Length<=0) return;
-                
+                if (currentBranch.colors.Length <= 0) return;
+
                 //Vertical rect, starts from the very left and then proceeds to te right
                 EditorGUI.DrawRect(
                     new Rect(
-                        GetStartX(originalRect, nestLevel), 
-                        originalRect.y  + originalRect.height/2f, 
-                        originalRect.height + (hasChilds ? -5 :  2), 
+                        GetStartX(originalRect, nestLevel) + (isLastChildInNestingLevel ? 0 : barWidth),
+                        originalRect.y + originalRect.height / 2f,
+                        originalRect.height + (hasChilds ? -5 : 2),
                         //originalRect.height - 5, 
                         barWidth
-                        ), 
+                        ),
                     GetNestColor(nestLevel)
                     );
             }
         }
-        
+
         #region Types
 
         [Serializable]
@@ -143,11 +143,14 @@ namespace Febucci.HierarchyData
             public bool isGoActive;
 
             public bool isLastElement;
+            public bool isLastChildInNestingLevel;
             public bool hasChilds;
             public bool topParentHasChild;
             
             public int nestingGroup;
             public int nestingLevel;
+
+            public int parentId;
         }
 
         #endregion
@@ -368,7 +371,8 @@ namespace Febucci.HierarchyData
                             nestingLevel: 0,
                             sceneRoots[j].transform.childCount > 0,
                             nestingGroup: j,
-                            isLastChild: j == sceneRoots.Length - 1
+                            isLastChild: j == sceneRoots.Length - 1,
+                            -1
                             );
                     }
 
@@ -377,7 +381,7 @@ namespace Febucci.HierarchyData
             }
         }
 
-        static void AnalyzeGoWithChildren(GameObject go, int nestingLevel, bool topParentHasChild, int nestingGroup, bool isLastChild)
+        static void AnalyzeGoWithChildren(GameObject go, int nestingLevel, bool topParentHasChild, int nestingGroup, bool isLastChild, int parentId)
         {
             int instanceID = go.GetInstanceID();
 
@@ -386,12 +390,14 @@ namespace Febucci.HierarchyData
                 InstanceInfo newInfo = new InstanceInfo();
                 newInfo.iconIndexes = new List<int>();
                 newInfo.isLastElement = isLastChild && go.transform.childCount == 0;
+                newInfo.isLastChildInNestingLevel = isLastChild;
                 newInfo.nestingLevel = nestingLevel;
                 newInfo.nestingGroup = nestingGroup;
                 newInfo.hasChilds = go.transform.childCount > 0;
                 newInfo.isGoActive = go.activeInHierarchy;
                 newInfo.topParentHasChild = topParentHasChild;
                 newInfo.goName = go.name;
+                newInfo.parentId = parentId;
 
                 if (data.prefabsData.enabled)
                 {
@@ -468,7 +474,8 @@ namespace Febucci.HierarchyData
                     nestingLevel + 1,
                     topParentHasChild,
                     nestingGroup,
-                    j == childCount - 1
+                    j == childCount - 1,
+                    instanceID
                     );
             }
 
@@ -524,7 +531,46 @@ namespace Febucci.HierarchyData
                     drawedPrefabOverlay = true;
                 }
             }
-            
+
+
+            #endregion
+
+            #region Drawing Separators Functionality
+
+            Action drawSeparator = () =>
+            {
+
+                //EditorOnly objects are only removed from build if they're not childrens
+                if (data.separator.enabled && data.separator.color.a > 0
+                                           && currentItem.isSeparator && currentItem.nestingLevel == 0)
+                {
+                    if (data.separator.fullWidth)
+                    {
+                        var startX = HierarchyRenderer.GetStartX(selectionRect, 0) - 6;
+                        var fullWidthRect = new Rect(
+                            startX,
+                            selectionRect.y,
+                            selectionRect.width + (selectionRect.x - startX),
+                            selectionRect.height
+                        );
+                        EditorGUI.DrawRect(fullWidthRect, data.separator.color);
+                    }
+                    else
+                    {
+                        EditorGUI.DrawRect(selectionRect, data.separator.color);
+                    }
+                }
+
+            };
+
+            #endregion
+
+            #region Drawing Separators Under Tree
+
+            if (data.separator.drawUnderTree)
+            {
+                drawSeparator();
+            }
 
             #endregion
             
@@ -551,16 +597,37 @@ namespace Febucci.HierarchyData
                     }
                     else
                     {
+                        var nestedItem = currentItem;
                         //Draws a vertical line for each previous nesting level
-                        for (int i = 0; i <= currentItem.nestingLevel; i++)
+                        for (int i = currentItem.nestingLevel; i >= 0; i--)
                         {
-                            HierarchyRenderer.DrawVerticalLineFrom(selectionRect, i);
+                            if (data.tree.drawBranchTails)
+                            {
+                                HierarchyRenderer.DrawVerticalLineFrom(selectionRect, i);
+                            }
+                            else
+                            {
+                                if (!nestedItem.isLastChildInNestingLevel)
+                                {
+                                    HierarchyRenderer.DrawVerticalLineFrom(selectionRect, i);
+                                }
+                                else if (i == currentItem.nestingLevel)
+                                {
+                                    HierarchyRenderer.DrawHalfVerticalLineFrom(selectionRect, true, i);
+                                }
+
+                                if (!sceneGameObjects.ContainsKey(nestedItem.parentId))
+                                {
+                                    break;
+                                }
+                                nestedItem = sceneGameObjects[nestedItem.parentId];
+                            }
                         }
-                        
-                            HierarchyRenderer.DrawHorizontalLineFrom(
-                                selectionRect, currentItem.nestingLevel, currentItem.hasChilds
-                                );
-                        
+
+                        HierarchyRenderer.DrawHorizontalLineFrom(
+                            selectionRect, currentItem.nestingLevel, currentItem.hasChilds, currentItem.isLastChildInNestingLevel
+                            );
+
                     }
 
                 }
@@ -581,14 +648,11 @@ namespace Febucci.HierarchyData
 
             #endregion
 
-            #region Drawing Separators
-            
-            //EditorOnly objects are only removed from build if they're not childrens
-            if (data.separator.enabled && data.separator.color.a >0
-                                       && currentItem.isSeparator && currentItem.nestingLevel == 0)
+            #region Drawing Separators Over Tree
+
+            if (!data.separator.drawUnderTree)
             {
-                //Adds color on top of the label
-                EditorGUI.DrawRect(selectionRect, data.separator.color);
+                drawSeparator();
             }
 
             #endregion
