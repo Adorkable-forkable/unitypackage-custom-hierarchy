@@ -346,7 +346,8 @@ namespace Febucci.HierarchyData
                     nestingLevel: -1,
                     prefabContentsRoot.transform.childCount > 0,
                     nestingGroup: 0,
-                    isLastChild: true);
+                    isLastChild: true,
+                    parentId: -1);
 
                 firstInstanceID = prefabContentsRoot.GetInstanceID();
 
